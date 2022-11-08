@@ -4,35 +4,51 @@ from gh import *
 import genghao_lightning as gl 
 
 HG = pickle_load('/Dataset/PyG/DBLP/Processed/DBLP.dglhg.pkl')
-HG.nodes['conference'].data['feat'] = torch.eye(HG.num_nodes('conference'))
 INFER_NTYPE = 'author'
 
+# HG = pickle_load('/Dataset/PyG/ogbn-mag/Processed/ogbn-mag-TransE.dglhg.pkl')
+# INFER_NTYPE = 'paper'
+
+# HG = pickle_load('/Dataset/OAG-from-HGT/Processed/OAG-CS/OAG-Venue/OAG-Venue.dglhg.pkl')
+# INFER_NTYPE = 'paper'
+
 HYPER_PARAM = dict(
-    hidden_dim = 128,
-    num_layers = 3, 
+    hidden_dim = 256,
+    num_layers = 4, 
     activation = nn.PReLU(), 
     
-    num_epochs = 500,
-    lr = 0.0001,
+    use_gpu = True, 
+    num_epochs = 100,
+    lr = 0.001,
     weight_decay = 0.00001, 
+    save_model_interval = -1,
+    save_embedding_interval = -1,  
 )
 
 
-def train_func(model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, test_mask):
+def train_func(epoch, model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, test_mask):
     pred = model(hg=hg, feat_dict=feat_dict)[infer_ntype][train_mask]
     target = label[train_mask]
     
     return dict(pred=pred, target=target)
 
 
-def val_func(model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, test_mask):
-    pred = model(hg=hg, feat_dict=feat_dict)[infer_ntype][val_mask]
+def val_func(epoch, model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, test_mask):
+    full_pred = model(hg=hg, feat_dict=feat_dict)[infer_ntype]
+    pred = full_pred[val_mask]
     target = label[val_mask]
+    
+    save_embedding_interval = HYPER_PARAM['save_embedding_interval']
+    if save_embedding_interval > 0 and epoch % save_embedding_interval == 0:
+        np.save(
+            arr = full_pred.detach().cpu().numpy(), 
+            file = f"./saved_embedding/embedding_epoch_{epoch}.npy",
+        )
     
     return dict(pred=pred, target=target)
 
 
-def test_func(model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, test_mask):
+def test_func(epoch, model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, test_mask):
     pred = model(hg=hg, feat_dict=feat_dict)[infer_ntype][test_mask]
     target = label[test_mask]
     
@@ -40,7 +56,8 @@ def test_func(model, hg, infer_ntype, feat_dict, label, train_mask, val_mask, te
                
 
 def main():
-    device = gl.auto_select_gpu()
+    set_cwd(__file__)
+    device = gl.auto_select_gpu(use_gpu=HYPER_PARAM['use_gpu'])
     
     hg = HG.to(device)
     feat_dict = dict(hg.ndata['feat']) 
@@ -65,6 +82,7 @@ def main():
     
     trainer = gl.FullBatchTrainer(
         model = model, 
+        project_name = 'RGCN',
     )
     
     trainer.train_and_eval(
@@ -84,6 +102,7 @@ def main():
         optimizer_type = 'Adam',
         optimizer_param = dict(lr=HYPER_PARAM['lr'], weight_decay=HYPER_PARAM['weight_decay']),
         num_epochs = HYPER_PARAM['num_epochs'],
+        save_model_interval = HYPER_PARAM['save_model_interval'],
     )
 
 
